@@ -45,12 +45,12 @@ jobs:
         run: |
           mkdir -p artifacts
           ffuf -w payloads/sqli.txt \
-          -u 'http://localhost:3000/rest/user/login' \ 
-          -X POST \
-          -d '{"email":"FUZZ","password":"pass"}'\
-          -H 'Content-Type: application/json' \
-          -mc 200 \ 
-          -o artifacts/ffuf.json
+              -u 'http://localhost:3000/rest/user/login' \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"email":"FUZZ","password":"pass"}' \
+              -mc 200 \
+              -o artifacts/ffuf.json
 
       - name: Save sample response diff 
         run: |
