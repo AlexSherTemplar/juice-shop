@@ -44,7 +44,7 @@ jobs:
       - name: Run ffuf login (email)
         run: |
           mkdir -p artifacts
-          ffuf -w payloads/sqli.txt -u 'http://localhost:3000/rest/user/login' -X POST -d 'email=FUZZ&password=pass' -fw 100 -o artifacts/ffuf.json
+          ffuf -w payloads/sqli.txt -u 'http://localhost:3000/rest/user/login' -X POST -d 'email=FUZZ&password=pass' -mc 200 -fw 100 -o artifacts/ffuf.json
 
       - name: Save sample response diff 
         run: |
