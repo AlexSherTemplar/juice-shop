@@ -1,4 +1,4 @@
-name: MyFuzzing
+name: JobsFuzzing
 
 on:
   push:
